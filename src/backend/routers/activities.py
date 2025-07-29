@@ -26,41 +26,41 @@ def get_activities(
     - start_time: Filter activities starting at or after this time (24-hour format, e.g., '14:30')
     - end_time: Filter activities ending at or before this time (24-hour format, e.g., '17:00')
     """
-    # Build the query based on provided filters
-    query = {}
-    
-    if day:
-        query["schedule_details.days"] = {"$in": [day]}
-    
-    if start_time:
-        query["schedule_details.start_time"] = {"$gte": start_time}
-    
-    if end_time:
-        query["schedule_details.end_time"] = {"$lte": end_time}
-    
-    # Query the database
+    # Query the database - for mock database, we'll get all and filter manually
     activities = {}
-    for activity in activities_collection.find(query):
+    for activity in activities_collection.find():
         name = activity.pop('_id')
-        activities[name] = activity
+        
+        # Apply filters manually for mock database
+        include_activity = True
+        
+        if day and 'schedule_details' in activity:
+            if day not in activity['schedule_details'].get('days', []):
+                include_activity = False
+        
+        if start_time and 'schedule_details' in activity:
+            if activity['schedule_details'].get('start_time', '') < start_time:
+                include_activity = False
+        
+        if end_time and 'schedule_details' in activity:
+            if activity['schedule_details'].get('end_time', '') > end_time:
+                include_activity = False
+        
+        if include_activity:
+            activities[name] = activity
     
     return activities
 
 @router.get("/days", response_model=List[str])
 def get_available_days() -> List[str]:
     """Get a list of all days that have activities scheduled"""
-    # Aggregate to get unique days across all activities
-    pipeline = [
-        {"$unwind": "$schedule_details.days"},
-        {"$group": {"_id": "$schedule_details.days"}},
-        {"$sort": {"_id": 1}}  # Sort days alphabetically
-    ]
+    # Get unique days across all activities for mock database
+    days = set()
+    for activity in activities_collection.find():
+        if 'schedule_details' in activity and 'days' in activity['schedule_details']:
+            days.update(activity['schedule_details']['days'])
     
-    days = []
-    for day_doc in activities_collection.aggregate(pipeline):
-        days.append(day_doc["_id"])
-    
-    return days
+    return sorted(list(days))
 
 @router.post("/{activity_name}/signup")
 def signup_for_activity(activity_name: str, email: str, teacher_username: Optional[str] = Query(None)):
@@ -84,13 +84,11 @@ def signup_for_activity(activity_name: str, email: str, teacher_username: Option
             status_code=400, detail="Already signed up for this activity")
 
     # Add student to participants
-    result = activities_collection.update_one(
+    activity["participants"].append(email)
+    activities_collection.update_one(
         {"_id": activity_name},
-        {"$push": {"participants": email}}
+        {"$set": {"participants": activity["participants"]}}
     )
-
-    if result.modified_count == 0:
-        raise HTTPException(status_code=500, detail="Failed to update activity")
     
     return {"message": f"Signed up {email} for {activity_name}"}
 
@@ -116,12 +114,10 @@ def unregister_from_activity(activity_name: str, email: str, teacher_username: O
             status_code=400, detail="Not registered for this activity")
 
     # Remove student from participants
-    result = activities_collection.update_one(
+    activity["participants"].remove(email)
+    activities_collection.update_one(
         {"_id": activity_name},
-        {"$pull": {"participants": email}}
+        {"$set": {"participants": activity["participants"]}}
     )
-
-    if result.modified_count == 0:
-        raise HTTPException(status_code=500, detail="Failed to update activity")
     
     return {"message": f"Unregistered {email} from {activity_name}"}

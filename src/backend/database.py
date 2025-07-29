@@ -1,15 +1,57 @@
 """
-MongoDB database configuration and setup for Mergington High School API
+Database configuration and setup for Mergington High School API
 """
 
-from pymongo import MongoClient
 from argon2 import PasswordHasher
+import copy
 
-# Connect to MongoDB
-client = MongoClient('mongodb://localhost:27017/')
-db = client['mergington_high']
-activities_collection = db['activities']
-teachers_collection = db['teachers']
+# In-memory database for development
+activities_data = {}
+teachers_data = {}
+
+# Mock collection classes
+class MockCollection:
+    def __init__(self, data_store):
+        self.data_store = data_store
+    
+    def count_documents(self, filter_query):
+        return len(self.data_store)
+    
+    def insert_one(self, document):
+        doc_id = document.get('_id')
+        if doc_id:
+            self.data_store[doc_id] = {k: v for k, v in document.items() if k != '_id'}
+        return document
+    
+    def find_one(self, filter_query):
+        if '_id' in filter_query:
+            doc_id = filter_query['_id']
+            if doc_id in self.data_store:
+                result = copy.deepcopy(self.data_store[doc_id])
+                result['_id'] = doc_id
+                return result
+        return None
+    
+    def find(self, filter_query=None):
+        results = []
+        for doc_id, data in self.data_store.items():
+            result = copy.deepcopy(data)
+            result['_id'] = doc_id
+            results.append(result)
+        return results
+    
+    def update_one(self, filter_query, update_query):
+        if '_id' in filter_query:
+            doc_id = filter_query['_id']
+            if doc_id in self.data_store:
+                if '$set' in update_query:
+                    self.data_store[doc_id].update(update_query['$set'])
+                return True
+        return False
+
+# Create mock collections
+activities_collection = MockCollection(activities_data)
+teachers_collection = MockCollection(teachers_data)
 
 # Methods
 def hash_password(password):
@@ -163,6 +205,17 @@ initial_activities = {
         },
         "max_participants": 16,
         "participants": ["william@mergington.edu", "jacob@mergington.edu"]
+    },
+    "Manga Maniacs": {
+        "description": "Embark on epic adventures with legendary heroes, mystical powers, and incredible storylines! Dive into the captivating world of Japanese Manga and discover amazing artwork that will blow your mind!",
+        "schedule": "Tuesdays, 7:00 PM - 8:30 PM",
+        "schedule_details": {
+            "days": ["Tuesday"],
+            "start_time": "19:00",
+            "end_time": "20:30"
+        },
+        "max_participants": 15,
+        "participants": []
     }
 }
 
